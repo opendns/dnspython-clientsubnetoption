@@ -14,16 +14,16 @@
 #      used to endorse or promote products derived from this software without
 #      specific prior written permission.
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
 # DISCLAIMED. IN NO EVENT SHALL OPENDNS BE LIABLE FOR ANY DIRECT, INDIRECT,
 # INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
 # LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
 # OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-# LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
-# OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+# NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+# EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 """ Class to implement draft-vandergaast-edns-client-subnet-01.
 
@@ -73,6 +73,16 @@ class ClientSubnetOption(dns.edns.Option):
             raise Exception("128 bits is the max for IPv6 (%d)" % bits)
 
     def calculate_ip(self):
+        """Calculates the relevant ip address based on the network mask.
+
+        Calculates the relevant bits of the IP address based on network mask.
+        Sizes up to the nearest octet for use with wire format.
+
+        Returns:
+            An integer of only the significant bits sized up to the nearest
+            octect.
+        """
+
         if self.family == 1:
             bits = 32
         elif self.family == 2:
@@ -86,6 +96,8 @@ class ClientSubnetOption(dns.edns.Option):
         return ip
 
     def to_wire(self, file):
+        """Create EDNS packet as definied in draft-vandergaast-edns-client-subnet-01."""
+
         ip = self.calculate_ip()
 
         mask_bits = self.mask
@@ -103,6 +115,12 @@ class ClientSubnetOption(dns.edns.Option):
         file.write(data)
 
     def from_wire(cls, otype, wire, current, olen):
+        """Read EDNS packet as defined in draft-vandergaast-edns-client-subnet-01.
+
+        Returns:
+            An instance of ClientSubnetOption based on the ENDS packet
+        """
+
         data = wire[current:current + olen]
         (family, mask, scope) = struct.unpack("!HBB", data[:4])
 
@@ -123,6 +141,39 @@ class ClientSubnetOption(dns.edns.Option):
         return cls(family, ip, mask, scope)
 
     from_wire = classmethod(from_wire)
+
+    def __eq__(self, other):
+        """Rich comparison method for equality.
+
+        Two ClientSubnetOptions are equal if their relevant ip bits, mask, and
+        family are identical. We ignore scope since generally we want to
+        compare questions to responses and that bit is only relevant when
+        determining caching behavior.
+
+        Returns:
+            boolean
+        """
+
+        if not isinstance(other, ClientSubnetOption):
+            return False
+        if self.calculate_ip() != other.calculate_ip():
+            return False
+        if self.mask != other.mask:
+            return False
+        if self.family != other.family:
+            return False
+        return True
+
+    def __ne__(self, other):
+        """Rich comparison method for inequality.
+
+        See notes for __eq__()
+
+        Returns:
+            boolean
+        """
+        return not self.__eq__(other)
+
 
 dns.edns._type_to_class[0x50fa] = ClientSubnetOption
 
@@ -164,7 +215,7 @@ if __name__ == "__main__":
         r = dns.query.tcp(message, addr)
     for options in r.options:
         if isinstance(options, ClientSubnetOption):
-            assert cso.family == options.family, "returned family (%d) is different from the passed family (%d)" ^ (options.family, cso.family)
+            assert cso.family == options.family, "returned family (%d) is different from the passed family (%d)" % (options.family, cso.family)
             assert cso.calculate_ip() == options.calculate_ip(), "returned ip (%s) is different from then passed  ip(%s)." % (options.calculate_ip(), cso.calculate_ip())
             assert options.mask == cso.mask, "returned mask bits (%d) is different from the passed mask bits (%d)" % (options.mask, cso.mask)
             assert options.scope != 0, "scope indicates edns-clientsubnet data is not used"
