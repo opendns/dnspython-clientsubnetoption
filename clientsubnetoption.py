@@ -212,7 +212,7 @@ if __name__ == "__main__":
     try:
         addr = socket.gethostbyname(args.nameserver)
     except socket.gaierror:
-        parser.exit(1, "Unable to resolve %s" % args.nameserver)
+        parser.exit(1, "Unable to resolve %s\n" % args.nameserver)
     cso = ClientSubnetOption(args.subnet['family'], args.subnet['ip'], args.mask)
 
     message = dns.message.make_query(args.rr, args.type)
@@ -222,18 +222,18 @@ if __name__ == "__main__":
         if r.flags & dns.flags.TC:
             r = dns.query.tcp(message, addr, timeout=args.timeout)
     except dns.exception.Timeout:
-        parser.exit(3, "Timeout: No answer received from %s" % args.nameserver)
+        parser.exit(3, "Timeout: No answer received from %s\n" % args.nameserver)
 
     for options in r.options:
         if isinstance(options, ClientSubnetOption):
             if not cso.family == options.family:
-                parser.exit(3, "Failed: returned family (%d) is different from the passed family (%d)" % (options.family, cso.family))
+                parser.exit(3, "Failed: returned family (%d) is different from the passed family (%d)\n" % (options.family, cso.family))
             if not cso.calculate_ip() == options.calculate_ip():
-                parser.exit(3, "Failed: returned ip (%s) is different from then passed  ip(%s)." % (options.calculate_ip(), cso.calculate_ip()))
+                parser.exit(3, "Failed: returned ip (%s) is different from then passed  ip(%s).\n" % (options.calculate_ip(), cso.calculate_ip()))
             if not options.mask == cso.mask:
-                parser.exit(3, "Failed: returned mask bits (%d) is different from the passed mask bits (%d)" % (options.mask, cso.mask))
+                parser.exit(3, "Failed: returned mask bits (%d) is different from the passed mask bits (%d)\n" % (options.mask, cso.mask))
             if not options.scope != 0:
-                parser.exit(4, "Warning: scope indicates edns-clientsubnet data is not used")
-            parser.exit(message="Success!")
+                parser.exit(4, "Warning: scope indicates edns-clientsubnet data is not used\n")
+            parser.exit(message="Success!\n")
 
-    parser.exit(3, "Failed: No ClientSubnetOption returned")
+    parser.exit(3, "Failed: No ClientSubnetOption returned\n")
