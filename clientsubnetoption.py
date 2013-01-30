@@ -32,9 +32,7 @@ Requirements:
   dnspython (http://www.dnspython.org/)
 """
 
-import socket
 import struct
-import sys
 import dns
 import dns.edns
 import dns.flags
@@ -178,45 +176,64 @@ class ClientSubnetOption(dns.edns.Option):
 dns.edns._type_to_class[0x50fa] = ClientSubnetOption
 
 if __name__ == "__main__":
-    if len(sys.argv) <= 2:
-        print("Format is %s [nameserver] [record] ([ip_to_fake [mask]])" % sys.argv[0])
-        sys.exit(1)
+    import argparse
+    import socket
 
-    if len(sys.argv) >= 4:
-        if ":" in sys.argv[3]:
-            family = 2
-            hi, lo = struct.unpack('!QQ', socket.inet_pton(socket.AF_INET6, sys.argv[3]))
-            ip = hi << 64 | lo
-        elif "." in sys.argv[3]:
-            family = 1
-            ip = struct.unpack('!L', socket.inet_aton(sys.argv[3]))[0]
+    def valid_ip(string):
+        if ":" in string:
+            try:
+                hi, lo = struct.unpack('!QQ', socket.inet_pton(socket.AF_INET6, string))
+                return {'family': 2, 'ip': hi << 64 | lo}
+            except:
+                pass
+        elif "." in string:
+            try:
+                ip = struct.unpack('!L', socket.inet_aton(string))[0]
+                return {'family': 1, 'ip': ip}
+            except:
+                pass
+        raise argparse.ArgumentTypeError("'%s' doesn't look like an IP to me..." % string)
+
+    parser = argparse.ArgumentParser(description='draft-vandergaast-edns-client-subnet-01 tester')
+    parser.add_argument('nameserver', help='The nameserver to test')
+    parser.add_argument('rr', help='DNS record that should return an EDNS enabled response')
+    parser.add_argument('-s', '--subnet', type=valid_ip, help='Specifies an IP to pass as the client subnet.', default={'family': 1, 'ip': 0xC0000200})
+    parser.add_argument('-m', '--mask', type=int, help='CIDR mask to use for subnet')
+    parser.add_argument('--timeout', type=int, help='Set the timeout for query to TIMEOUT seconds, default=10', default=10)
+    parser.add_argument('-t', '--type', help='DNS query type, default=A', default='A')
+    args = parser.parse_args()
+
+    if not args.mask:
+        if args.subnet['family'] == 2:
+            args.mask = 48
         else:
-            print "'%s' doesn't look like an IP to me..." % sys.argv[3]
-            sys.exit(1)
-    else:
-        family = 1
-        ip = 0xC0000200
+            args.mask = 24
 
-    if len(sys.argv) == 5:
-        mask = int(sys.argv[4])
-    else:
-        if family == 2:
-            mask = 48
-        else:
-            mask = 24
+    try:
+        addr = socket.gethostbyname(args.nameserver)
+    except socket.gaierror:
+        parser.exit(1, "Unable to resolve %s" % args.nameserver)
+    cso = ClientSubnetOption(args.subnet['family'], args.subnet['ip'], args.mask)
 
-    addr = socket.gethostbyname(sys.argv[1])
-    cso = ClientSubnetOption(family, ip, mask)
-
-    message = dns.message.make_query(sys.argv[2], "A")
+    message = dns.message.make_query(args.rr, args.type)
     message.use_edns(options=[cso])
-    r = dns.query.udp(message, addr)
-    if r.flags & dns.flags.TC:
-        r = dns.query.tcp(message, addr)
+    try:
+        r = dns.query.udp(message, addr, timeout=args.timeout)
+        if r.flags & dns.flags.TC:
+            r = dns.query.tcp(message, addr, timeout=args.timeout)
+    except dns.exception.Timeout:
+        parser.exit(3, "Timeout: No answer received from %s" % args.nameserver)
+
     for options in r.options:
         if isinstance(options, ClientSubnetOption):
-            assert cso.family == options.family, "returned family (%d) is different from the passed family (%d)" % (options.family, cso.family)
-            assert cso.calculate_ip() == options.calculate_ip(), "returned ip (%s) is different from then passed  ip(%s)." % (options.calculate_ip(), cso.calculate_ip())
-            assert options.mask == cso.mask, "returned mask bits (%d) is different from the passed mask bits (%d)" % (options.mask, cso.mask)
-            assert options.scope != 0, "scope indicates edns-clientsubnet data is not used"
-            print "Success!"
+            if not cso.family == options.family:
+                parser.exit(3, "Failed: returned family (%d) is different from the passed family (%d)" % (options.family, cso.family))
+            if not cso.calculate_ip() == options.calculate_ip():
+                parser.exit(3, "Failed: returned ip (%s) is different from then passed  ip(%s)." % (options.calculate_ip(), cso.calculate_ip()))
+            if not options.mask == cso.mask:
+                parser.exit(3, "Failed: returned mask bits (%d) is different from the passed mask bits (%d)" % (options.mask, cso.mask))
+            if not options.scope != 0:
+                parser.exit(4, "Warning: scope indicates edns-clientsubnet data is not used")
+            parser.exit(message="Success!")
+
+    parser.exit(3, "Failed: No ClientSubnetOption returned")
