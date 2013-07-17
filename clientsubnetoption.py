@@ -40,7 +40,10 @@ import dns.message
 import dns.query
 
 __author__ = "bhartvigsen@opendns.com (Brian Hartvigsen)"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
+
+ASSIGNED_OPTION_CODE = 0x0008
+DRAFT_OPTION_CODE = 0x50FA
 
 
 class ClientSubnetOption(dns.edns.Option):
@@ -54,8 +57,8 @@ class ClientSubnetOption(dns.edns.Option):
             the authoritative server.
     """
 
-    def __init__(self, family, ip, bits=24, scope=0):
-        super(ClientSubnetOption, self).__init__(0x50fa)
+    def __init__(self, family, ip, bits=24, scope=0, option=ASSIGNED_OPTION_CODE):
+        super(ClientSubnetOption, self).__init__(option)
 
         if not (family == 1 or family == 2):
             raise Exception("Family must be either 1 (IPv4) or 2 (IPv6)")
@@ -64,6 +67,7 @@ class ClientSubnetOption(dns.edns.Option):
         self.ip = ip
         self.mask = bits
         self.scope = scope
+        self.option = option
 
         if self.family == 1 and self.mask > 32:
             raise Exception("32 bits is the max for IPv4 (%d)" % bits)
@@ -92,6 +96,10 @@ class ClientSubnetOption(dns.edns.Option):
             ip = ip << 8 - (self.mask % 8)
 
         return ip
+
+    def is_draft(self):
+        """" Determines whether this instance is using the draft option code """
+        return self.option == DRAFT_OPTION_CODE
 
     def to_wire(self, file):
         """Create EDNS packet as definied in draft-vandergaast-edns-client-subnet-01."""
@@ -136,9 +144,19 @@ class ClientSubnetOption(dns.edns.Option):
         else:
             raise Exception("Returned a family other then 1 (IPv4) or 2 (IPv6)")
 
-        return cls(family, ip, mask, scope)
+        return cls(family, ip, mask, scope, otype)
 
     from_wire = classmethod(from_wire)
+
+    def __repr__(self):
+        return "%s(%s, %s, %s, %s, %s)" % (
+            self.__class__.__name__,
+            self.family,
+            self.ip,
+            self.mask,
+            self.scope,
+            self.otype
+        )
 
     def __eq__(self, other):
         """Rich comparison method for equality.
@@ -173,11 +191,13 @@ class ClientSubnetOption(dns.edns.Option):
         return not self.__eq__(other)
 
 
-dns.edns._type_to_class[0x50fa] = ClientSubnetOption
+dns.edns._type_to_class[DRAFT_OPTION_CODE] = ClientSubnetOption
+dns.edns._type_to_class[ASSIGNED_OPTION_CODE] = ClientSubnetOption
 
 if __name__ == "__main__":
     import argparse
     import socket
+    import sys
 
     def valid_ip(string):
         if ":" in string:
@@ -212,28 +232,51 @@ if __name__ == "__main__":
     try:
         addr = socket.gethostbyname(args.nameserver)
     except socket.gaierror:
-        parser.exit(1, "Unable to resolve %s\n" % args.nameserver)
+        print >> sys.stderr, "Unable to resolve %s\n" % args.nameserver
+        sys.exit(3)
+
     cso = ClientSubnetOption(args.subnet['family'], args.subnet['ip'], args.mask)
+    draftcso = ClientSubnetOption(args.subnet['family'], args.subnet['ip'], args.mask, 0, DRAFT_OPTION_CODE)
 
     message = dns.message.make_query(args.rr, args.type)
-    message.use_edns(options=[cso])
+    # Tested authoritative servers seem to use the last code in cases
+    # where they support both. We make the official code last to allow
+    # us to check for support of both draft and official
+    message.use_edns(options=[draftcso, cso])
+
     try:
         r = dns.query.udp(message, addr, timeout=args.timeout)
         if r.flags & dns.flags.TC:
             r = dns.query.tcp(message, addr, timeout=args.timeout)
     except dns.exception.Timeout:
-        parser.exit(3, "Timeout: No answer received from %s\n" % args.nameserver)
+        print >> sys.stderr, "Timeout: No answer received from %s\n" % args.nameserver
+        sys.exit(3)
 
+    error = False
+    found = False
     for options in r.options:
+        # Have not run into anyone who passes back both codes yet
+        # but just in case, we want to check all possible options
         if isinstance(options, ClientSubnetOption):
+            found = True
+            print >> sys.stderr, "Found ClientSubnetOption...",
             if not cso.family == options.family:
-                parser.exit(3, "Failed: returned family (%d) is different from the passed family (%d)\n" % (options.family, cso.family))
+                error = True
+                print >> sys.stderr, "\nFailed: returned family (%d) is different from the passed family (%d)" % (options.family, cso.family)
             if not cso.calculate_ip() == options.calculate_ip():
-                parser.exit(3, "Failed: returned ip (%s) is different from then passed  ip(%s).\n" % (options.calculate_ip(), cso.calculate_ip()))
+                error = True
+                print >> sys.stderr, "\nFailed: returned ip (%s) is different from the passed ip (%s)." % (options.calculate_ip(), cso.calculate_ip())
             if not options.mask == cso.mask:
-                parser.exit(3, "Failed: returned mask bits (%d) is different from the passed mask bits (%d)\n" % (options.mask, cso.mask))
+                error = True
+                print >> sys.stderr, "\nFailed: returned mask bits (%d) is different from the passed mask bits (%d)" % (options.mask, cso.mask)
             if not options.scope != 0:
-                parser.exit(4, "Warning: scope indicates edns-clientsubnet data is not used\n")
-            parser.exit(message="Success!\n")
+                print >> sys.stderr, "\nWarning: scope indicates edns-clientsubnet data is not used"
+            if options.is_draft():
+                print >> sys.stderr, "\nWarning: detected support for edns-clientsubnet draft code"
 
-    parser.exit(3, "Failed: No ClientSubnetOption returned\n")
+    if found and not error:
+        print >> sys.stderr, "Success"
+    elif found:
+        print >> sys.stderr, "Failed: See error messages above"
+    else:
+        print >> sys.stderr, "Failed: No ClientSubnetOption returned"
