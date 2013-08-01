@@ -199,6 +199,52 @@ if __name__ == "__main__":
     import socket
     import sys
 
+    def CheckForClientSubnetOption(addr, args, option_code=ASSIGNED_OPTION_CODE):
+        print >> sys.stderr, "Testing for edns-clientsubnet using option code", hex(option_code)
+        cso = ClientSubnetOption(args.subnet['family'], args.subnet['ip'], args.mask, option=option_code)
+        message = dns.message.make_query(args.rr, args.type)
+        # Tested authoritative servers seem to use the last code in cases
+        # where they support both. We make the official code last to allow
+        # us to check for support of both draft and official
+        message.use_edns(options=[cso])
+
+        try:
+            r = dns.query.udp(message, addr, timeout=args.timeout)
+            if r.flags & dns.flags.TC:
+                r = dns.query.tcp(message, addr, timeout=args.timeout)
+        except dns.exception.Timeout:
+            print >> sys.stderr, "Timeout: No answer received from %s\n" % args.nameserver
+            sys.exit(3)
+
+        error = False
+        found = False
+        for options in r.options:
+            # Have not run into anyone who passes back both codes yet
+            # but just in case, we want to check all possible options
+            if isinstance(options, ClientSubnetOption):
+                found = True
+                print >> sys.stderr, "Found ClientSubnetOption...",
+                if not cso.family == options.family:
+                    error = True
+                    print >> sys.stderr, "\nFailed: returned family (%d) is different from the passed family (%d)" % (options.family, cso.family)
+                if not cso.calculate_ip() == options.calculate_ip():
+                    error = True
+                    print >> sys.stderr, "\nFailed: returned ip (%s) is different from the passed ip (%s)." % (options.calculate_ip(), cso.calculate_ip())
+                if not options.mask == cso.mask:
+                    error = True
+                    print >> sys.stderr, "\nFailed: returned mask bits (%d) is different from the passed mask bits (%d)" % (options.mask, cso.mask)
+                if not options.scope != 0:
+                    print >> sys.stderr, "\nWarning: scope indicates edns-clientsubnet data is not used"
+                if options.is_draft():
+                    print >> sys.stderr, "\nWarning: detected support for edns-clientsubnet draft code"
+
+        if found and not error:
+            print >> sys.stderr, "Success"
+        elif found:
+            print >> sys.stderr, "Failed: See error messages above"
+        else:
+            print >> sys.stderr, "Failed: No ClientSubnetOption returned"
+
     def valid_ip(string):
         if ":" in string:
             try:
@@ -235,48 +281,6 @@ if __name__ == "__main__":
         print >> sys.stderr, "Unable to resolve %s\n" % args.nameserver
         sys.exit(3)
 
-    cso = ClientSubnetOption(args.subnet['family'], args.subnet['ip'], args.mask)
-    draftcso = ClientSubnetOption(args.subnet['family'], args.subnet['ip'], args.mask, 0, DRAFT_OPTION_CODE)
-
-    message = dns.message.make_query(args.rr, args.type)
-    # Tested authoritative servers seem to use the last code in cases
-    # where they support both. We make the official code last to allow
-    # us to check for support of both draft and official
-    message.use_edns(options=[draftcso, cso])
-
-    try:
-        r = dns.query.udp(message, addr, timeout=args.timeout)
-        if r.flags & dns.flags.TC:
-            r = dns.query.tcp(message, addr, timeout=args.timeout)
-    except dns.exception.Timeout:
-        print >> sys.stderr, "Timeout: No answer received from %s\n" % args.nameserver
-        sys.exit(3)
-
-    error = False
-    found = False
-    for options in r.options:
-        # Have not run into anyone who passes back both codes yet
-        # but just in case, we want to check all possible options
-        if isinstance(options, ClientSubnetOption):
-            found = True
-            print >> sys.stderr, "Found ClientSubnetOption...",
-            if not cso.family == options.family:
-                error = True
-                print >> sys.stderr, "\nFailed: returned family (%d) is different from the passed family (%d)" % (options.family, cso.family)
-            if not cso.calculate_ip() == options.calculate_ip():
-                error = True
-                print >> sys.stderr, "\nFailed: returned ip (%s) is different from the passed ip (%s)." % (options.calculate_ip(), cso.calculate_ip())
-            if not options.mask == cso.mask:
-                error = True
-                print >> sys.stderr, "\nFailed: returned mask bits (%d) is different from the passed mask bits (%d)" % (options.mask, cso.mask)
-            if not options.scope != 0:
-                print >> sys.stderr, "\nWarning: scope indicates edns-clientsubnet data is not used"
-            if options.is_draft():
-                print >> sys.stderr, "\nWarning: detected support for edns-clientsubnet draft code"
-
-    if found and not error:
-        print >> sys.stderr, "Success"
-    elif found:
-        print >> sys.stderr, "Failed: See error messages above"
-    else:
-        print >> sys.stderr, "Failed: No ClientSubnetOption returned"
+    CheckForClientSubnetOption(addr, args, DRAFT_OPTION_CODE)
+    print >> sys.stderr
+    CheckForClientSubnetOption(addr, args, ASSIGNED_OPTION_CODE)
