@@ -39,19 +39,13 @@ import socket
 import struct
 import dns
 import dns.edns
-import dns.flags
-import dns.message
-import dns.query
 
 __author__ = "bhartvigsen@opendns.com (Brian Hartvigsen)"
-__version__ = "2.1.0"
+__version__ = "3.0.0"
 
 ASSIGNED_OPTION_CODE = 0x0008
 DRAFT_OPTION_CODE = 0x50FA
-
-FAMILY_IPV4 = 1
-FAMILY_IPV6 = 2
-SUPPORTED_FAMILIES = (FAMILY_IPV4, FAMILY_IPV6)
+_BITS_TO_SEGMENT = 8
 
 
 class ClientSubnetOption(dns.edns.Option):
@@ -65,126 +59,37 @@ class ClientSubnetOption(dns.edns.Option):
             the authoritative server.
     """
 
-    def __init__(self, ip, bits=24, scope=0, option=ASSIGNED_OPTION_CODE):
-        super(ClientSubnetOption, self).__init__(option)
+    factory = []
+    _MIN_BITS = 0
 
-        n = None
-        f = None
-
-        for family in (socket.AF_INET, socket.AF_INET6):
+    @staticmethod
+    def FromIPString(ip, mask=24, scope=0, option=ASSIGNED_OPTION_CODE):
+        opt = None
+        for make in ClientSubnetOption.factory:
             try:
-                n = socket.inet_pton(family, ip)
-                if family == socket.AF_INET6:
-                    f = FAMILY_IPV6
-                    hi, lo = struct.unpack('!QQ', n)
-                    ip = hi << 64 | lo
-                elif family == socket.AF_INET:
-                    f = FAMILY_IPV4
-                    ip = struct.unpack('!L', n)[0]
-            except Exception:
+                opt = make(ip, mask, scope, option)
+            except socket.error as e:
                 pass
+            except AttributeError as e:
+                raise e
+        return opt
 
-        if n is None:
-            raise Exception("%s is an invalid ip" % ip)
+    @staticmethod
+    def GetClassFromFamily(family):
+        for make in ClientSubnetOption.factory:
+            if make._IANA_FAMILY == family:
+                return make
+        raise NotImplementedError('Family type {0} is not implemented'.format(family))
 
-        self.family = f
-        self.ip = ip
-        self.mask = bits
+    def __init__(self, scope, option):
+        super(ClientSubnetOption, self).__init__(option)
         self.scope = scope
         self.option = option
 
-        if self.family == FAMILY_IPV4 and self.mask > 32:
-            raise Exception("32 bits is the max for IPv4 (%d)" % bits)
-        if self.family == FAMILY_IPV6 and self.mask > 128:
-            raise Exception("128 bits is the max for IPv6 (%d)" % bits)
-
-    def calculate_ip(self):
-        """Calculates the relevant ip address based on the network mask.
-
-        Calculates the relevant bits of the IP address based on network mask.
-        Sizes up to the nearest octet for use with wire format.
-
-        Returns:
-            An integer of only the significant bits sized up to the nearest
-            octect.
-        """
-
-        if self.family == FAMILY_IPV4:
-            bits = 32
-        elif self.family == FAMILY_IPV6:
-            bits = 128
-
-        ip = self.ip >> bits - self.mask
-
-        if (self.mask % 8 != 0):
-            ip = ip << 8 - (self.mask % 8)
-
-        return ip
-
-    def is_draft(self):
-        """" Determines whether this instance is using the draft option code """
-        return self.option == DRAFT_OPTION_CODE
-
-    def to_wire(self, file):
-        """Create EDNS packet as definied in draft-vandergaast-edns-client-subnet-01."""
-
-        ip = self.calculate_ip()
-
-        mask_bits = self.mask
-        if mask_bits % 8 != 0:
-                mask_bits += 8 - (self.mask % 8)
-
-        if self.family == FAMILY_IPV4:
-            test = struct.pack("!L", ip)
-        elif self.family == FAMILY_IPV6:
-            test = struct.pack("!QQ", ip >> 64, ip & (2 ** 64 - 1))
-        test = test[-(mask_bits // 8):]
-
-        format = "!HBB%ds" % (mask_bits // 8)
-        data = struct.pack(format, self.family, self.mask, self.scope, test)
-        file.write(data)
-
-    def from_wire(cls, otype, wire, current, olen):
-        """Read EDNS packet as defined in draft-vandergaast-edns-client-subnet-01.
-
-        Returns:
-            An instance of ClientSubnetOption based on the ENDS packet
-        """
-
-        data = wire[current:current + olen]
-        (family, mask, scope) = struct.unpack("!HBB", data[:4])
-
-        c_mask = mask
-        if mask % 8 != 0:
-            c_mask += 8 - (mask % 8)
-
-        ip = struct.unpack_from("!%ds" % (c_mask // 8), data, 4)[0]
-
-        if (family == FAMILY_IPV4):
-            ip = ip + b'\0' * ((32 - c_mask) // 8)
-            ip = socket.inet_ntop(socket.AF_INET, ip)
-        elif (family == FAMILY_IPV6):
-            ip = ip + b'\0' * ((128 - c_mask) // 8)
-            ip = socket.inet_ntop(socket.AF_INET6, ip)
-        else:
-            raise Exception("Returned a family other then IPv4 or IPv6")
-
-        return cls(ip, mask, scope, otype)
-
-    from_wire = classmethod(from_wire)
-
     def __repr__(self):
-        if self.family == FAMILY_IPV4:
-            ip = socket.inet_ntop(socket.AF_INET, struct.pack('!L', self.ip))
-        elif self.family == FAMILY_IPV6:
-            ip = socket.inet_ntop(socket.AF_INET6,
-                                  struct.pack('!QQ',
-                                              self.ip >> 64,
-                                              self.ip & (2 ** 64 - 1)))
-
-        return "%s(%s, %s, %s)" % (
+        return "{0:s}({1:s}, {2:s}, {3:s})".format(
             self.__class__.__name__,
-            ip,
+            self._ip_to_str(),
             self.mask,
             self.scope
         )
@@ -203,11 +108,11 @@ class ClientSubnetOption(dns.edns.Option):
 
         if not isinstance(other, ClientSubnetOption):
             return False
-        if self.calculate_ip() != other.calculate_ip():
+        if self.calculate_address() != other.calculate_address():
             return False
         if self.mask != other.mask:
             return False
-        if self.family != other.family:
+        if self._IANA_FAMILY != other._IANA_FAMILY:
             return False
         return True
 
@@ -221,6 +126,124 @@ class ClientSubnetOption(dns.edns.Option):
         """
         return not self.__eq__(other)
 
+    def calculate_address(self):
+        raise NotImplementedError('Nothing to see here')
+
+    def _to_packed(self, ip):
+        raise NotImplementedError('Nothing to see here')
+
+    def is_draft(self):
+        """" Determines whether this instance is using the draft option code """
+        return self.option == DRAFT_OPTION_CODE
+
+    def to_wire(self, file):
+        """Create EDNS packet as definied in draft-vandergaast-edns-client-subnet-01."""
+
+        ip = self.calculate_address()
+        ip = self._to_packed(ip)
+
+        mask_bits = self.mask
+        if mask_bits % _BITS_TO_SEGMENT != 0:
+                mask_bits += _BITS_TO_SEGMENT - (self.mask % _BITS_TO_SEGMENT)
+        ip = ip[-(mask_bits // _BITS_TO_SEGMENT):]
+
+        format = "!HBB{0:d}s".format(mask_bits // _BITS_TO_SEGMENT)
+        data = struct.pack(format, self._IANA_FAMILY, self.mask, 0, ip)
+        file.write(data)
+
+    @classmethod
+    def from_wire(cls, option, wire, current, olen):
+        """Read EDNS packet as defined in draft-vandergaast-edns-client-subnet-01.
+
+        Returns:
+            An instance of ClientSubnetOption based on the ENDS packet
+        """
+
+        data = wire[current:current + olen]
+        (family, mask, scope) = struct.unpack("!HBB", data[:4])
+
+        c_mask = mask
+        if mask % _BITS_TO_SEGMENT != 0:
+            c_mask += _BITS_TO_SEGMENT - (mask % _BITS_TO_SEGMENT)
+
+        ip = struct.unpack_from("!{0:d}s".format(c_mask // _BITS_TO_SEGMENT), data, 4)[0]
+
+        child = cls.GetClassFromFamily(family)
+        ip = ip + b'\0' * ((child._MAX_BITS - c_mask) // _BITS_TO_SEGMENT)
+        ip = child._packed_ip_to_str(ip)
+
+        return child(ip, mask, scope, option)
+
+
+class _IPClientSubnetOption(ClientSubnetOption):
+    def __init__(self, ip, mask=24, scope=0, option=ASSIGNED_OPTION_CODE):
+        ip = socket.inet_pton(self._AF_FAMILY, ip)
+        ip = struct.unpack(self._STRUCT, ip)
+        self.ip = self._to_int(ip)
+
+        if mask > self._MAX_BITS or mask < self._MIN_BITS:
+            raise AttributeError('bits must be between {0} and {1}'.format(
+                self._MIN_BITS,
+                self._MAX_BITS
+            ))
+        self.mask = mask
+
+        if scope > self._MAX_BITS or scope < self._MIN_BITS:
+            raise AttributeError('scope must be between {0} and {1}'.format(
+                self._MIN_BITS,
+                self._MAX_BITS
+            ))
+        self.scope = scope
+
+        super(_IPClientSubnetOption, self).__init__(scope, option)
+
+    def _to_int(self, ip):
+        raise NotImplementedError('Nothing to see here')
+
+    def calculate_address(self):
+        ip = self.ip >> (self._MAX_BITS - self.mask)
+
+        # 8 bits per segment
+        if (self.mask % _BITS_TO_SEGMENT != 0):
+            ip = ip << (_BITS_TO_SEGMENT - (self.mask % _BITS_TO_SEGMENT))
+
+        return ip
+
+    @classmethod
+    def _packed_ip_to_str(cls, ip):
+        return socket.inet_ntop(cls._AF_FAMILY, ip)
+
+    def _ip_to_str(self):
+        return self._packed_ip_to_str(self._to_packed(self.ip))
+
+
+class _IPv6ClientSubnetOption(_IPClientSubnetOption):
+    _AF_FAMILY = socket.AF_INET6
+    _IANA_FAMILY = 2
+    _MAX_BITS = 128
+    _STRUCT = '!QQ'
+
+    def _to_int(self, ip):
+        return ip[0] << 64 | ip[1]
+
+    def _to_packed(self, ip):
+        return struct.pack(self._STRUCT, ip >> 64, ip & (2 ** 64 - 1))
+
+
+class _IPv4ClientSubnetOption(_IPClientSubnetOption):
+    _AF_FAMILY = socket.AF_INET
+    _IANA_FAMILY = 1
+    _MAX_BITS = 32
+    _STRUCT = '!L'
+
+    def _to_int(self, ip):
+        return ip[0]
+
+    def _to_packed(self, ip):
+        return struct.pack(self._STRUCT, ip)
+
+ClientSubnetOption.factory.append(_IPv4ClientSubnetOption)
+ClientSubnetOption.factory.append(_IPv6ClientSubnetOption)
 
 dns.edns._type_to_class[DRAFT_OPTION_CODE] = ClientSubnetOption
 dns.edns._type_to_class[ASSIGNED_OPTION_CODE] = ClientSubnetOption
@@ -228,10 +251,12 @@ dns.edns._type_to_class[ASSIGNED_OPTION_CODE] = ClientSubnetOption
 if __name__ == "__main__":
     import argparse
     import sys
+    import dns.message
+    import dns.query
 
     def CheckForClientSubnetOption(addr, args, option_code=ASSIGNED_OPTION_CODE):
         print("Testing for edns-clientsubnet using option code", hex(option_code), file=sys.stderr)
-        cso = ClientSubnetOption(args.subnet, args.mask, option=option_code)
+        cso = ClientSubnetOption.FromIPString(args.subnet, args.mask, option=option_code)
         message = dns.message.make_query(args.rr, args.type)
         # Tested authoritative servers seem to use the last code in cases
         # where they support both. We make the official code last to allow
@@ -246,7 +271,7 @@ if __name__ == "__main__":
             if r.flags & dns.flags.TC:
                 r = dns.query.tcp(message, addr, timeout=args.timeout)
         except dns.exception.Timeout:
-            print("Timeout: No answer received from %s\n" % args.nameserver, file=sys.stderr)
+            print("Timeout: No answer received from {0:s}".format(args.nameserver), file=sys.stderr)
             return
 
         error = False
@@ -256,16 +281,16 @@ if __name__ == "__main__":
             # but just in case, we want to check all possible options
             if isinstance(options, ClientSubnetOption):
                 found = True
-                print("Found ClientSubnetOption...", end=None, file=sys.stderr)
-                if not cso.family == options.family:
+                print("Found ClientSubnetOption...", end="", file=sys.stderr)
+                if not cso._IANA_FAMILY == options._IANA_FAMILY:
                     error = True
-                    print("\nFailed: returned family (%d) is different from the passed family (%d)" % (options.family, cso.family), file=sys.stderr)
-                if not cso.calculate_ip() == options.calculate_ip():
+                    print("\nFailed: returned family ({0:d}) is different from the passed family ({1:d})".format(options._IANA_FAMILY, cso._IANA_FAMILY), file=sys.stderr)
+                if not cso.calculate_address() == options.calculate_address():
                     error = True
-                    print("\nFailed: returned ip (%s) is different from the passed ip (%s)." % (options.calculate_ip(), cso.calculate_ip()), file=sys.stderr)
+                    print("\nFailed: returned ip ({0:s}) is different from the passed ip ({1:s}).".format(options.calculate_address(), cso.calculate_address()), file=sys.stderr)
                 if not options.mask == cso.mask:
                     error = True
-                    print("\nFailed: returned mask bits (%d) is different from the passed mask bits (%d)" % (options.mask, cso.mask), file=sys.stderr)
+                    print("\nFailed: returned mask bits ({0:d}) is different from the passed mask bits ({1:d})".format(options.mask, cso.mask), file=sys.stderr)
                 if not options.scope != 0:
                     print("\nWarning: scope indicates edns-clientsubnet data is not used", file=sys.stderr)
                 if options.is_draft():
@@ -297,7 +322,7 @@ if __name__ == "__main__":
     try:
         addr = socket.gethostbyname(args.nameserver)
     except socket.gaierror:
-        print("Unable to resolve %s\n" % args.nameserver, file=sys.stderr)
+        print("Unable to resolve {0:s}".format(args.nameserver), file=sys.stderr)
         sys.exit(3)
 
     CheckForClientSubnetOption(addr, args, DRAFT_OPTION_CODE)
