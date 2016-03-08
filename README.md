@@ -15,6 +15,12 @@ Class to add [draft-vandergaast-edns-client-subnet-01](http://tools.ietf.org/htm
 
 ## Changelog
 
+### 2.1.0
+ * Correctly set scope in `to_wire` (@rgacogne)
+ * CLI Improvements:
+   * Option to set Recursion Desired flag on the message
+   * Won't fail completely on nameserver timeout
+
 ### 2.0.0
  * Python 3 compatible (tested with 3.4.3 & 2.7.10)
  * Can be installed via pip: `pip install clientsubnetoption`
