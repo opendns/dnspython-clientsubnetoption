@@ -238,6 +238,9 @@ if __name__ == "__main__":
         # us to check for support of both draft and official
         message.use_edns(options=[cso])
 
+        if args.recursive:
+            message.flags = message.flags | dns.flags.RD
+
         try:
             r = dns.query.udp(message, addr, timeout=args.timeout)
             if r.flags & dns.flags.TC:
@@ -282,6 +285,7 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--mask', type=int, help='CIDR mask to use for subnet')
     parser.add_argument('--timeout', type=int, help='Set the timeout for query to TIMEOUT seconds, default=10', default=10)
     parser.add_argument('-t', '--type', help='DNS query type, default=A', default='A')
+    parser.add_argument('-r', '--recursive', action="store_true", help='Send a query with RD bits set', default=False)
     args = parser.parse_args()
 
     if not args.mask:
