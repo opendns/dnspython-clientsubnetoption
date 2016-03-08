@@ -244,7 +244,7 @@ if __name__ == "__main__":
                 r = dns.query.tcp(message, addr, timeout=args.timeout)
         except dns.exception.Timeout:
             print("Timeout: No answer received from %s\n" % args.nameserver, file=sys.stderr)
-            sys.exit(3)
+            return
 
         error = False
         found = False
