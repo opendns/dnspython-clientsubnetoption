@@ -1,6 +1,6 @@
 # ClientSubnetOption
 
-Class to add [draft-vandergaast-edns-client-subnet-01](http://tools.ietf.org/html/draft-vandergaast-edns-client-subnet-01) support to [dnspython](http://www.dnspython.org).
+Class to add [RFC 7871 - Client Subnet in DNS Queries](https://tools.ietf.org/html/rfc7871) support to [dnspython](http://www.dnspython.org).
 
 ## Installation
 
