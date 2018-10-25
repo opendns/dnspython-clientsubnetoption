@@ -39,6 +39,9 @@ for option in result.options:
 ### 3.0.0 [unreleased]
  * Rewritten in an object-oriented fashioned
 
+### 2.1.1
+ * Better default for bitmask values (@DarkDeviL)
+
 ### 2.1.0
  * Correctly set scope in `to_wire` (@rgacogne)
  * CLI Improvements:

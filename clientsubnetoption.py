@@ -63,7 +63,7 @@ class ClientSubnetOption(dns.edns.Option):
     _MIN_BITS = 0
 
     @staticmethod
-    def FromIPString(ip, mask=24, scope=0, option=ASSIGNED_OPTION_CODE):
+    def FromIPString(ip, mask=-1, scope=0, option=ASSIGNED_OPTION_CODE):
         opt = None
         for make in ClientSubnetOption.factory:
             try:
@@ -176,10 +176,16 @@ class ClientSubnetOption(dns.edns.Option):
 
 
 class _IPClientSubnetOption(ClientSubnetOption):
-    def __init__(self, ip, mask=24, scope=0, option=ASSIGNED_OPTION_CODE):
+    def __init__(self, ip, mask=-1, scope=0, option=ASSIGNED_OPTION_CODE):
         ip = socket.inet_pton(self._AF_FAMILY, ip)
         ip = struct.unpack(self._STRUCT, ip)
         self.ip = self._to_int(ip)
+
+        if mask == -1:
+            if self._AF_FAMILY == socket.AF_INET6:
+                mask = 48
+            else:
+                mask = 24
 
         if mask > self._MAX_BITS or mask < self._MIN_BITS:
             raise AttributeError('bits must be between {0} and {1}'.format(
