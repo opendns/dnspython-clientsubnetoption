@@ -10,7 +10,7 @@ elif sys.version_info[0] == 2:
     requires = ['dnspython']
 
 setup(name='clientsubnetoption',
-      version='2.1.0',
+      version='2.1.1',
       maintainer='Brian Hartvigsen',
       maintainer_email='bhartvigsen@opendns.com',
       description='EDNS Client Subnet option support for dnspython',

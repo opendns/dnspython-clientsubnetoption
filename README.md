@@ -15,6 +15,9 @@ Class to add [RFC 7871 - Client Subnet in DNS Queries](https://tools.ietf.org/ht
 
 ## Changelog
 
+### 2.1.1
+ * Better default for bitmask values (@DarkDeviL)
+
 ### 2.1.0
  * Correctly set scope in `to_wire` (@rgacogne)
  * CLI Improvements:

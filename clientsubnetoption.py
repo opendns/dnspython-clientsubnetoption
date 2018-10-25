@@ -44,7 +44,7 @@ import dns.message
 import dns.query
 
 __author__ = "bhartvigsen@opendns.com (Brian Hartvigsen)"
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 
 ASSIGNED_OPTION_CODE = 0x0008
 DRAFT_OPTION_CODE = 0x50FA
