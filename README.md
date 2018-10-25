@@ -36,7 +36,7 @@ for option in result.options:
 
 ## Changelog
 
-### 3.0.0 [unreleased]
+### 3.0.0a1
  * Rewritten in an object-oriented fashioned
 
 ### 2.1.1

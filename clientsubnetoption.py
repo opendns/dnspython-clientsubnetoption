@@ -25,8 +25,7 @@
 # NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 # EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-""" Class to implement draft-ietf-dnsop-edns-client-subnet (previously known as
-draft-vandergaast-edns-client-subnet.
+""" Class to implement RFC 7871 Client Subnet in DNS Queries
 
 The contained class supports both IPv4 and IPv6 addresses.
 Requirements:
@@ -41,7 +40,7 @@ import dns
 import dns.edns
 
 __author__ = "bhartvigsen@opendns.com (Brian Hartvigsen)"
-__version__ = "3.0.0"
+__version__ = "3.0.0a1"
 
 ASSIGNED_OPTION_CODE = 0x0008
 DRAFT_OPTION_CODE = 0x50FA
@@ -49,7 +48,7 @@ _BITS_TO_SEGMENT = 8
 
 
 class ClientSubnetOption(dns.edns.Option):
-    """Implementation of draft-vandergaast-edns-client-subnet-01.
+    """Implementation of RFC 7871 Client Subnet in DNS Queries
 
     Attributes:
         family: An integer inidicating which address family is being sent
@@ -153,7 +152,7 @@ class ClientSubnetOption(dns.edns.Option):
 
     @classmethod
     def from_wire(cls, option, wire, current, olen):
-        """Read EDNS packet as defined in draft-vandergaast-edns-client-subnet-01.
+        """Read EDNS packet as defined in RFC 7871 Client Subnet in DNS Queries
 
         Returns:
             An instance of ClientSubnetOption based on the ENDS packet
@@ -309,7 +308,7 @@ if __name__ == "__main__":
         else:
             print("Failed: No ClientSubnetOption returned", file=sys.stderr)
 
-    parser = argparse.ArgumentParser(description='draft-vandergaast-edns-client-subnet-01 tester')
+    parser = argparse.ArgumentParser(description='RFC 7871 Client Subnet in DNS Queries tester')
     parser.add_argument('nameserver', help='The nameserver to test')
     parser.add_argument('rr', help='DNS record that should return an EDNS enabled response')
     parser.add_argument('-s', '--subnet', help='Specifies an IP to pass as the client subnet.', default='192.0.2.0')
