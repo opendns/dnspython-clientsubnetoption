@@ -65,7 +65,7 @@ class ClientSubnetOption(dns.edns.Option):
             the authoritative server.
     """
 
-    def __init__(self, ip, bits=24, scope=0, option=ASSIGNED_OPTION_CODE):
+    def __init__(self, ip, bits=-1, scope=0, option=ASSIGNED_OPTION_CODE):
         super(ClientSubnetOption, self).__init__(option)
 
         n = None
@@ -76,10 +76,14 @@ class ClientSubnetOption(dns.edns.Option):
                 n = socket.inet_pton(family, ip)
                 if family == socket.AF_INET6:
                     f = FAMILY_IPV6
+                    if bits == -1:
+                        bits = 48
                     hi, lo = struct.unpack('!QQ', n)
                     ip = hi << 64 | lo
                 elif family == socket.AF_INET:
                     f = FAMILY_IPV4
+                    if bits == -1:
+                        bits = 24
                     ip = struct.unpack('!L', n)[0]
             except Exception:
                 pass
